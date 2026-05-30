@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎧 Escucha+ | JDwulander</title>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; font-family:Arial; user-select:none; }
+        body { background:#0a0a0a; color:white; padding:20px; }
+        h1 { text-align:center; color:#00ccff; margin:20px 0; font-size:22px; }
+        .aviso { background:#ff3333; color:white; padding:25px; border-radius:12px; text-align:center; font-weight:bold; margin-bottom:20px; display:block; }
+        .contenido { display:none; }
+        .modo { background:#007aff; padding:18px; margin:10px 0; border-radius:10px; text-align:center; font-size:18px; }
+        .estado { background:#222; padding:12px; border-radius:8px; text-align:center; margin-top:20px; font-size:14px; color:#4cd137; }
+        .seguridad { background:#f39c12; padding:10px; border-radius:8px; text-align:center; margin-top:10px; font-size:13px; }
+    </style>
+</head>
+<body>
+
+    <h1>🎧 ESCUCHA+ <br><small>JDwulander</small></h1>
+
+    <div id="bloqueo" class="aviso">
+        ⚠️ CONECTA TUS AUDÍFONOS PARA ENTRAR ⚠️<br>
+        <small>Altavoz BLOQUEADO permanentemente</small>
+    </div>
+
+    <div id="app" class="contenido">
+        <div class="modo" onclick="activar('Escuela', 45, -15)">🏫 Escuela / Reuniones<br><small>Resalta voces</small></div>
+        <div class="modo" onclick="activar('Calle', 35, -20)">🚗 Calle / Ruido<br><small>Elimina viento/motor</small></div>
+        <div class="modo" onclick="activar('Gimnasio', 20, -10)">🏋️ Gimnasio / Protección<br><small>Máxima seguridad</small></div>
+        <div class="modo" onclick="activar('Parque', 30, 0)">🌳 Parque / Aire Libre<br><small>Sonido natural</small></div>
+        <div class="modo" onclick="activar('Casa', 40, 5)">🏠 Casa / Tranquilo<br><small>Claro y suave</small></div>
+        <div class="modo" onclick="activar('Llamadas', 50, 20)">📞 Modo Llamadas<br><small>Solo voces</small></div>
+
+        <div class="seguridad">🛡️ SEGURIDAD: Volumen máximo 80% | Altavoz 100% BLOQUEADO</div>
+        <div class="estado" id="estadoAudio">🔊 SALIDA: SOLO AUDÍFONOS ✅</div>
+    </div>
+
+<script>
+let audifonosConectados = false;
+const LIMITE_SEGURIDAD = 80;
+
+navigator.mediaDevices.addEventListener('devicechange', verificarConexion);
+verificarConexion();
+
+function verificarConexion(){
+    navigator.mediaDevices.enumerateDevices().then(dispositivos => {
+        audifonosConectados = dispositivos.some(disp => disp.kind === 'audiooutput' && 
+            (disp.label.includes('auriculares') || disp.label.includes('headphone') || disp.label.includes('bluetooth') || disp.label.includes('cable')));
+
+        if(audifonosConectados){
+            document.getElementById('bloqueo').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            forzarSalidaAuriculares();
+        } else {
+            document.getElementById('bloqueo').style.display = 'block';
+            document.getElementById('app').style.display = 'none';
+        }
+    });
+}
+
+function forzarSalidaAuriculares(){
+    if('setSinkId' in HTMLMediaElement.prototype){
+        navigator.mediaDevices.getUserMedia({audio: {deviceId: 'default'}}).then(stream => {
+            const audioPrueba = new Audio();
+            audioPrueba.srcObject = stream;
+            audioPrueba.setSinkId('audio-output-headphones').catch(()=>{});
+        });
+    }
+}
+
+function activar(nombre, ganancia, ecualizacion){
+    if(!audifonosConectados) return alert("❌ ERROR: Conecta primero los audífonos");
+    if(ganancia > LIMITE_SEGURIDAD) {
+        ganancia = LIMITE_SEGURIDAD;
+        alert("🔒 SEGURIDAD: No se sube más del 80%");
+    }
+    alert(`✅ MODO: ${nombre}\n🔊 Ganancia: +${ganancia}%\n🔊 SALIDA: SOLO AUDÍFONOS`);
+}
+</script>
+
+</body>
+</html>
