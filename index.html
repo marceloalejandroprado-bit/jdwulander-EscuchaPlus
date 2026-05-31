@@ -8,7 +8,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <title>Escucha+</title>
     <script>
-        // Activar modo sin internet
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('./sw.js');
@@ -35,16 +34,14 @@
             background: linear-gradient(180deg, #000 0%, #0a0a0a 100%);
         }
 
-        /* Solo el nombre */
         .titulo {
             font-size: 36px;
             color: #00aaff;
             margin: 25px 0;
             font-weight: bold;
-            text-shadow: 0 0 10px rgba(170, 204, 255, 0.4);
+            text-shadow: 0 0 10px rgba(0,170,255,0.4);
         }
 
-        /* Cartel de alerta */
         .alerta-roja {
             width: 100%;
             max-width: 460px;
@@ -56,27 +53,29 @@
             padding: 20px;
             border-radius: 12px;
             margin-bottom: 25px;
-            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+            box-shadow: 0 0 20px rgba(255,0,0,0.5);
             animation: parpadeo 1.5s infinite alternate;
             border: 2px solid #ff4444;
+            display: block;
         }
 
         @keyframes parpadeo {
-            from {box-shadow: 0 0 15px rgba(255, 0, 0, 0.4);}
-            to {box-shadow: 0 0 25px rgba(255, 0, 0, 0.8);}
+            from {box-shadow: 0 0 15px rgba(255,0,0,0.4);}
+            to {box-shadow: 0 0 25px rgba(255,0,0,0.8);}
         }
 
         .estado {
             color: #ff3333;
             font-weight: bold;
-            margin-bottom: 30px;
+            margin-bottom: 15px;
             font-size: 16px;
             text-align: center;
             padding: 8px;
             border-bottom: 1px solid #222;
+            width: 100%;
+            max-width: 460px;
         }
 
-        /* Zona de modos */
         .modos {
             width: 100%;
             max-width: 460px;
@@ -84,13 +83,14 @@
             flex-direction: column;
             gap: 12px;
             margin-bottom: 25px;
-            opacity: 1;
+            opacity: 0.15;
             transition: all 0.4s;
+            pointer-events: none;
         }
 
-        .modos.oculto {
-            opacity: 0.15;
-            pointer-events: none;
+        .modos.activo {
+            opacity: 1;
+            pointer-events: auto;
         }
 
         .modo {
@@ -101,7 +101,7 @@
             padding: 16px 18px;
             border-radius: 8px;
             cursor: pointer;
-            box-shadow: 0 4px 10px rgba(0, 122, 255, 0.3);
+            box-shadow: 0 4px 10px rgba(0,122,255,0.3);
             border-left: 4px solid #00ccff;
             display: flex;
             justify-content: space-between;
@@ -143,12 +143,19 @@
             width: 100%;
             max-width: 460px;
             border: 1px solid #222;
+            min-height: 45px;
         }
 
         .salida.error {
             color: #f22;
             background: #1a0505;
             border-color: #400;
+        }
+
+        .salida.aviso {
+            color: #ffcc00;
+            background: #1a1805;
+            border-color: #403f00;
         }
     </style>
 </head>
@@ -157,11 +164,11 @@
     <h1 class="titulo">Escucha+</h1>
 
     <div class="alerta-roja" id="alerta">
-        CONECTA TUS AUDÍFONOS
+        ¡ALERTA! PARLANTE PROHIBIDO
     </div>
 
     <div class="estado" id="textoEstado">
-        ESPERANDO CONEXIÓN SEGURA
+        ❌ BLOQUEADO - CONECTE AURICULARES
     </div>
 
     <div class="modos" id="panelModos">
@@ -204,73 +211,166 @@
     </div>
 
     <div class="salida" id="salidaAudio">
-        SALIDA: ESPERANDO...
+        🔄 INICIANDO PERMISOS...
     </div>
 
 
     <script>
-        // LÓGICA ANDROID - DETECCIÓN REAL
+        // VARIABLES GLOBALES
         const alerta = document.getElementById('alerta');
         const panel = document.getElementById('panelModos');
         const textoEstado = document.getElementById('textoEstado');
         const salidaAudio = document.getElementById('salidaAudio');
+        let permisoConcedido = false;
+        let audioContext;
+        let analyser;
+        let datosSonido;
 
-        function verificarAndroid() {
-            if (!navigator.mediaDevices) {
-                salidaAudio.innerHTML = "❌ NO COMPATIBLE";
+        // ==============================================
+        // PASO 1: PEDIR PERMISOS TOTALES OBLIGATORIOS
+        // ==============================================
+        async function iniciarPermisos() {
+            try {
+                // ACCESO TOTAL AL MICRÓFONO Y SALIDA
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: true,
+                        sampleRate: 48000,
+                        channelCount: 2
+                    },
+                    video: false
+                });
+
+                permisoConcedido = true;
+                salidaAudio.innerHTML = "✅ PERMISOS OBTENIDOS | DETECTANDO...";
+                salidaAudio.classList.remove('error', 'aviso');
+
+                // INICIAR SISTEMA DE ANÁLISIS DE SONIDO
+                iniciarAnalisisSonido(stream);
+
+                // EMPEZAR A REVISAR CADA SEGUNDO
+                setInterval(verificarTodo, 1000);
+                verificarTodo();
+
+            } catch (error) {
+                permisoConcedido = false;
+                salidaAudio.innerHTML = "❌ ERROR: PERMISO DENEGADO | ACTIVALO EN AJUSTES";
                 salidaAudio.classList.add('error');
-                return;
+                textoEstado.innerHTML = "❌ SIN ACCESO";
+                textoEstado.style.color = "#f22";
             }
+        }
 
-            navigator.mediaDevices.enumerateDevices()
-            .then(lista => {
-                let ok = false;
-                let tipo = "";
+        // ==============================================
+        // PASO 2: ANÁLISIS DE SONIDO (RECONOCE LO QUE ESCUCHA)
+        // ==============================================
+        function iniciarAnalisisSonido(stream) {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const fuente = audioContext.createMediaStreamSource(stream);
+                fuente.connect(analyser);
 
-                lista.forEach(d => {
-                    if(d.kind === 'audiooutput') {
-                        let nom = d.label.toLowerCase();
-                        // DETECCIÓN EXACTA PARA ANDROID
-                        if( nom.includes('headphone') || 
-                            nom.includes('auricular') || 
-                            nom.includes('bluetooth') || 
-                            nom.includes('wired') || 
-                            nom.includes('usb') ) {
-                            ok = true;
-                            tipo = "AURICULARES CONECTADOS ✅";
-                        }
-                        else if( nom.includes('speaker') || nom.includes('altavoz') || nom.includes('parlante') ) {
-                            ok = false;
-                            tipo = "PARLANTE ACTIVO ❌";
+                analyser.fftSize = 256;
+                const tamanoBuffer = analyser.frequencyBinCount;
+                datosSonido = new Uint8Array(tamanoBuffer);
+
+            } catch (e) {
+                salidaAudio.innerHTML += "<br>⚠️ ANÁLISIS DE SONIDO LIMITADO";
+                salidaAudio.classList.add('aviso');
+            }
+        }
+
+        function medirNivelSonido() {
+            if (!analyser) return 0;
+            analyser.getByteFrequencyData(datosSonido);
+            const promedio = datosSonido.reduce((a,b) => a + b) / datosSonido.length;
+            return Math.round(promedio);
+        }
+
+        // ==============================================
+        // PASO 3: DETECCIÓN DE AURICULARES (ANDROID 100%)
+        // ==============================================
+        async function verificarAuriculares() {
+            if (!permisoConcedido) return false;
+
+            try {
+                const dispositivos = await navigator.mediaDevices.enumerateDevices();
+                let conectado = false;
+
+                dispositivos.forEach(disp => {
+                    if (disp.kind === 'audiooutput') {
+                        const nombre = disp.label.toLowerCase().trim();
+                        
+                        // DETECCIÓN COMPLETA DE TODOS LOS TIPOS
+                        if (
+                            nombre.includes('headphone') ||
+                            nombre.includes('auricular') ||
+                            nombre.includes('headset') ||
+                            nombre.includes('bluetooth') ||
+                            nombre.includes('wireless') ||
+                            nombre.includes('cable') ||
+                            nombre.includes('usb') ||
+                            nombre.includes('wired') ||
+                            nombre.includes('a2dp') ||
+                            nombre.includes('hfp') ||
+                            nombre.includes('audio jack') ||
+                            nombre === '' // En Android, si no tiene nombre = auriculares conectados
+                        ) {
+                            conectado = true;
                         }
                     }
                 });
 
-                if (ok) {
-                    // ✅ DESBLOQUEAR
-                    alerta.style.display = 'none';
-                    panel.classList.remove('oculto');
-                    textoEstado.innerHTML = "✅ SISTEMA ACTIVO";
-                    textoEstado.style.color = "#0f4";
-                    salidaAudio.innerHTML = "🔊 " + tipo;
-                    salidaAudio.classList.remove('error');
-                } else {
-                    // ❌ BLOQUEAR
-                    alerta.style.display = 'block';
-                    panel.classList.add('oculto');
-                    textoEstado.innerHTML = "❌ BLOQUEADO - CONECTE AURICULARES";
-                    textoEstado.style.color = "#f22";
-                    salidaAudio.innerHTML = "🔇 " + tipo;
-                    salidaAudio.classList.add('error');
-                    alerta.style.backgroundColor = "#ff0000";
-                    alerta.innerHTML = "¡ALERTA! PARLANTE PROHIBIDO";
-                }
-            });
+                return conectado;
+
+            } catch (e) {
+                return false;
+            }
         }
 
-        // REVISAR CADA SEGUNDO EN ANDROID
-        setInterval(verificarAndroid, 1200);
-        verificarAndroid();
+        // ==============================================
+        // PASO 4: REVISIÓN GENERAL (ACTIVAR / DESACTIVAR)
+        // ==============================================
+        async function verificarTodo() {
+            const hayAuriculares = await verificarAuriculares();
+            const nivelSonido = medirNivelSonido();
+
+            // --------------------------
+            // ✅ SISTEMA ACTIVO
+            // --------------------------
+            if (hayAuriculares) {
+                alerta.style.display = 'none';
+                panel.classList.add('activo');
+                textoEstado.innerHTML = "✅ SISTEMA ACTIVO | PROTEGIDO";
+                textoEstado.style.color = "#0f4";
+
+                // INFORMACIÓN DE SONIDO
+                if (nivelSonido > 5) {
+                    salidaAudio.innerHTML = `🔊 SONIDO DETECTADO | NIVEL: ${nivelSonido}/100`;
+                    salidaAudio.classList.remove('error', 'aviso');
+                } else {
+                    salidaAudio.innerHTML = "🔇 SILENCIO | ESPERANDO SONIDO...";
+                    salidaAudio.classList.add('aviso');
+                }
+            }
+            // --------------------------
+            // ❌ SISTEMA BLOQUEADO
+            // --------------------------
+            else {
+                alerta.style.display = 'block';
+                panel.classList.remove('activo');
+                textoEstado.innerHTML = "❌ BLOQUEADO | SOLO AURICULARES PERMITIDOS";
+                textoEstado.style.color = "#ff3333";
+                salidaAudio.innerHTML = "🔇 PARLANTE DETECTADO | BLOQUEO ACTIVO";
+                salidaAudio.classList.add('error');
+            }
+        }
+
+        // INICIAR TODO AL CARGAR
+        window.addEventListener('DOMContentLoaded', iniciarPermisos);
     </script>
 
 </body>
