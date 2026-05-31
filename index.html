@@ -168,7 +168,7 @@
     </div>
 
     <div class="estado" id="textoEstado">
-        ❌ BLOQUEADO - CONECTE AURICULARES
+        ❌ SIN ACCESO
     </div>
 
     <div class="modos" id="panelModos">
@@ -211,100 +211,32 @@
     </div>
 
     <div class="salida" id="salidaAudio">
-        🔄 INICIANDO PERMISOS...
+        🔄 DETECTANDO DISPOSITIVOS...
     </div>
 
 
     <script>
-        // VARIABLES GLOBALES
+        // VERSIÓN MEJORADA: SIN PERMISO DE MICRÓFONO, SOLO DETECCIÓN DE SALIDA
         const alerta = document.getElementById('alerta');
         const panel = document.getElementById('panelModos');
         const textoEstado = document.getElementById('textoEstado');
         const salidaAudio = document.getElementById('salidaAudio');
-        let permisoConcedido = false;
-        let audioContext;
-        let analyser;
-        let datosSonido;
+        let detectando = false;
 
         // ==============================================
-        // PASO 1: PEDIR PERMISOS TOTALES OBLIGATORIOS
-        // ==============================================
-        async function iniciarPermisos() {
-            try {
-                // ACCESO TOTAL AL MICRÓFONO Y SALIDA
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: true,
-                        sampleRate: 48000,
-                        channelCount: 2
-                    },
-                    video: false
-                });
-
-                permisoConcedido = true;
-                salidaAudio.innerHTML = "✅ PERMISOS OBTENIDOS | DETECTANDO...";
-                salidaAudio.classList.remove('error', 'aviso');
-
-                // INICIAR SISTEMA DE ANÁLISIS DE SONIDO
-                iniciarAnalisisSonido(stream);
-
-                // EMPEZAR A REVISAR CADA SEGUNDO
-                setInterval(verificarTodo, 1000);
-                verificarTodo();
-
-            } catch (error) {
-                permisoConcedido = false;
-                salidaAudio.innerHTML = "❌ ERROR: PERMISO DENEGADO | ACTIVALO EN AJUSTES";
-                salidaAudio.classList.add('error');
-                textoEstado.innerHTML = "❌ SIN ACCESO";
-                textoEstado.style.color = "#f22";
-            }
-        }
-
-        // ==============================================
-        // PASO 2: ANÁLISIS DE SONIDO (RECONOCE LO QUE ESCUCHA)
-        // ==============================================
-        function iniciarAnalisisSonido(stream) {
-            try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                const fuente = audioContext.createMediaStreamSource(stream);
-                fuente.connect(analyser);
-
-                analyser.fftSize = 256;
-                const tamanoBuffer = analyser.frequencyBinCount;
-                datosSonido = new Uint8Array(tamanoBuffer);
-
-            } catch (e) {
-                salidaAudio.innerHTML += "<br>⚠️ ANÁLISIS DE SONIDO LIMITADO";
-                salidaAudio.classList.add('aviso');
-            }
-        }
-
-        function medirNivelSonido() {
-            if (!analyser) return 0;
-            analyser.getByteFrequencyData(datosSonido);
-            const promedio = datosSonido.reduce((a,b) => a + b) / datosSonido.length;
-            return Math.round(promedio);
-        }
-
-        // ==============================================
-        // PASO 3: DETECCIÓN DE AURICULARES (ANDROID 100%)
+        // DETECCIÓN DIRECTA DE SALIDA DE AUDIO
         // ==============================================
         async function verificarAuriculares() {
-            if (!permisoConcedido) return false;
-
             try {
                 const dispositivos = await navigator.mediaDevices.enumerateDevices();
                 let conectado = false;
+                let tipo = "";
 
                 dispositivos.forEach(disp => {
                     if (disp.kind === 'audiooutput') {
                         const nombre = disp.label.toLowerCase().trim();
                         
-                        // DETECCIÓN COMPLETA DE TODOS LOS TIPOS
+                        // 📱 DETECCIÓN ESPECIAL PARA ANDROID
                         if (
                             nombre.includes('headphone') ||
                             nombre.includes('auricular') ||
@@ -315,62 +247,64 @@
                             nombre.includes('usb') ||
                             nombre.includes('wired') ||
                             nombre.includes('a2dp') ||
-                            nombre.includes('hfp') ||
                             nombre.includes('audio jack') ||
-                            nombre === '' // En Android, si no tiene nombre = auriculares conectados
+                            nombre === '' || // Android: vacío = auriculares
+                            nombre.includes('default')
                         ) {
                             conectado = true;
+                            tipo = "🎧 AURICULARES CONECTADOS";
+                        }
+                        else if (nombre.includes('speaker') || nombre.includes('altavoz') || nombre.includes('parlante')) {
+                            conectado = false;
+                            tipo = "🔊 PARLANTE INTERNO";
                         }
                     }
                 });
 
-                return conectado;
+                actualizarEstado(conectado, tipo);
 
             } catch (e) {
-                return false;
-            }
-        }
-
-        // ==============================================
-        // PASO 4: REVISIÓN GENERAL (ACTIVAR / DESACTIVAR)
-        // ==============================================
-        async function verificarTodo() {
-            const hayAuriculares = await verificarAuriculares();
-            const nivelSonido = medirNivelSonido();
-
-            // --------------------------
-            // ✅ SISTEMA ACTIVO
-            // --------------------------
-            if (hayAuriculares) {
-                alerta.style.display = 'none';
-                panel.classList.add('activo');
-                textoEstado.innerHTML = "✅ SISTEMA ACTIVO | PROTEGIDO";
-                textoEstado.style.color = "#0f4";
-
-                // INFORMACIÓN DE SONIDO
-                if (nivelSonido > 5) {
-                    salidaAudio.innerHTML = `🔊 SONIDO DETECTADO | NIVEL: ${nivelSonido}/100`;
-                    salidaAudio.classList.remove('error', 'aviso');
-                } else {
-                    salidaAudio.innerHTML = "🔇 SILENCIO | ESPERANDO SONIDO...";
-                    salidaAudio.classList.add('aviso');
-                }
-            }
-            // --------------------------
-            // ❌ SISTEMA BLOQUEADO
-            // --------------------------
-            else {
-                alerta.style.display = 'block';
-                panel.classList.remove('activo');
-                textoEstado.innerHTML = "❌ BLOQUEADO | SOLO AURICULARES PERMITIDOS";
-                textoEstado.style.color = "#ff3333";
-                salidaAudio.innerHTML = "🔇 PARLANTE DETECTADO | BLOQUEO ACTIVO";
+                salidaAudio.innerHTML = "⚠️ ERROR DE DETECCIÓN";
                 salidaAudio.classList.add('error');
             }
         }
 
-        // INICIAR TODO AL CARGAR
-        window.addEventListener('DOMContentLoaded', iniciarPermisos);
+        // ==============================================
+        // ACTUALIZAR PANTALLA
+        // ==============================================
+        function actualizarEstado(conectado, texto) {
+            if (conectado) {
+                // ✅ DESBLOQUEAR TODO
+                alerta.style.display = 'none';
+                panel.classList.add('activo');
+                textoEstado.innerHTML = "✅ SISTEMA ACTIVO | PERMITIDO";
+                textoEstado.style.color = "#0f4";
+                salidaAudio.innerHTML = texto + " | LISTO PARA USAR";
+                salidaAudio.classList.remove('error', 'aviso', 'error');
+                salidaAudio.classList.add('aviso');
+            } else {
+                // ❌ BLOQUEAR TODO
+                alerta.style.display = 'block';
+                panel.classList.remove('activo');
+                textoEstado.innerHTML = "❌ BLOQUEADO | SOLO AURICULARES";
+                textoEstado.style.color = "#ff3333";
+                salidaAudio.innerHTML = texto + " | PROHIBIDO";
+                salidaAudio.classList.add('error');
+            }
+        }
+
+        // ==============================================
+        // INICIAR REVISIÓN CONSTANTE
+        // ==============================================
+        function iniciar() {
+            if (detectando) return;
+            detectando = true;
+            verificarAuriculares();
+            setInterval(verificarAuriculares, 1200); // Revisa cada 1.2 segundos
+        }
+
+        // ARRANQUE
+        window.addEventListener('DOMContentLoaded', iniciar);
     </script>
 
 </body>
